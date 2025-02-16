@@ -1,7 +1,0 @@
-{
-    "cookies": "SESSDATA=\"30a3dd31%2C1755185550%2Cb5b0c%2A21CjCfViCt5qaanYy-Hxxm6gHMtXumMArtNO_H97pZkI1vfrqxhki3HXSgH4lNDK1uATYSVkh5VzBkbTY4azA1ODktcUxiQmdJWVl0bjYtNjFwQzFXQk1vTjY0MjhkQWxMN09QTnNnMWNwaDRTSjZpSUJzeFA0d3ZoWno4LVJvdDU2V1hQNjV6VzNBIIEC\"; DedeUserID=434885501; bili_jct=eaa23902711f83779ce81dc3e47fa187",
-    "save_path": "./bili_videos",
-    "ffmpeg_path": "ffmpeg",
-    "request_interval": 1.5,
-    "max_retries": 3
-  }

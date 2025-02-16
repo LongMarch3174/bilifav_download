@@ -1,3 +1,4 @@
+import json
 from time import sleep
 from http.cookiejar import LWPCookieJar
 import requests
@@ -63,6 +64,20 @@ def scan_code(session2):
     with open(temp_cookie_file, 'r', encoding='utf-8') as f:
         bzcookie = f.read()
     bili_jct = findall(r'bili_jct=(.*?);', bzcookie)[0]
+    SESSDATA = findall(r'SESSDATA="(.*?);', bzcookie)[0]
+    DedeUserID = findall(r'DedeUserID=(.*?);', bzcookie)[0]
+
+    cookies_data = {
+        "cookies": f'SESSDATA="{SESSDATA}; DedeUserID={DedeUserID}; bili_jct={bili_jct}',
+        "save_path": "./bili_videos",
+        "ffmpeg_path": "ffmpeg",
+        "request_interval": 1.5,
+        "max_retries": 3
+    }
+
+    # Save the cookies data into a JSON file
+    with open('config.json', 'w', encoding='utf-8') as json_file:
+        json.dump(cookies_data, json_file, ensure_ascii=False, indent=4)
 
 
 def bz_login():
