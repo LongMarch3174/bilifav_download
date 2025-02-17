@@ -7,13 +7,9 @@ RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@http://mirrors.aliyun.com/ubuntu
 WORKDIR /app
 
 # 更新包列表并安装 Python 3.8 和相关依赖
-RUN apt clean && apt update && apt install -y python3
-RUN apt install -y python3-dev
-RUN apt install -y python3-pip
-
-RUN ln -sf /usr/bin/pip3 /usr/bin/pip && ln -sf /usr/bin/python3 /usr/bin/python
-
-RUN mv /usr/lib/python3.12/EXTERNALLY-MANAGED /usr/lib/python3.12/EXTERNALLY-MANAGED.bk
+RUN apt clean && apt update && apt install -y python3 && apt install -y python3-dev && apt install -y python3-pip \
+    && ln -sf /usr/bin/pip3 /usr/bin/pip && ln -sf /usr/bin/python3 /usr/bin/python \
+    && mv /usr/lib/python3.12/EXTERNALLY-MANAGED /usr/lib/python3.12/EXTERNALLY-MANAGED.bk
 
 # 将项目文件复制到容器的工作目录中
 COPY . /app
