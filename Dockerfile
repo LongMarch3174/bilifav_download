@@ -7,12 +7,15 @@ RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@http://mirrors.aliyun.com/ubuntu
 WORKDIR /app
 
 # 更新包列表并安装 Python 3.8 和相关依赖
-RUN apt clean && apt update && apt install -y python3 && apt install -y python3-dev && apt install -y python3-pip \
+RUN apt clean && apt update && apt install -y python3 python3-dev python3-pip \
     && ln -sf /usr/bin/pip3 /usr/bin/pip && ln -sf /usr/bin/python3 /usr/bin/python \
-    && mv /usr/lib/python3.12/EXTERNALLY-MANAGED /usr/lib/python3.12/EXTERNALLY-MANAGED.bk
+    && mv /usr/lib/python3.12/EXTERNALLY-MANAGED /usr/lib/python3.12/EXTERNALLY-MANAGED.bk \
+    && apt install -y sqlite3 libsqlite3-dev
 
 # 将项目文件复制到容器的工作目录中
 COPY . /app
+
+RUN mkdir /db && /usr/bin/sqlite3 /db/bilibili_downloader.db
 
 RUN pip install --no-cache-dir -r requirements.txt -i https://pypi.tuna.tsinghua.edu.cn/simple
 
