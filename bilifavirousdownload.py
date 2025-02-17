@@ -5,6 +5,7 @@ import json
 import logging
 import requests
 import subprocess
+import sqlite3
 from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass
@@ -41,15 +42,31 @@ class Config:
     ffmpeg_path: str = "ffmpeg"
     request_interval: float = 1.5
     max_retries: int = 3
-    history_file: Path = Path("./download_history.json")
+    history_db: Path = Path("./db/bilibili_downloader.db")
     temp_dir: Path = Path("./temp")
 
     def __post_init__(self):
         self.save_path.mkdir(parents=True, exist_ok=True)
         self.temp_dir.mkdir(parents=True, exist_ok=True)
-        if not self.history_file.exists():
+        """if not self.history_file.exists():
             with open(self.history_file, "w", encoding="utf-8") as f:
-                json.dump([], f, indent=2, ensure_ascii=False)
+                json.dump([], f, indent=2, ensure_ascii=False)"""
+        self._init_db()
+
+    def _init_db(self):
+        """初始化数据库"""
+        conn = sqlite3.connect(self.history_db)
+        cursor = conn.cursor()
+        cursor.execute('''CREATE TABLE IF NOT EXISTS downloads (
+                            bvid TEXT NOT NULL,
+                            cid INTEGER NOT NULL,
+                            quality INTEGER NOT NULL,
+                            title TEXT NOT NULL,
+                            up_name TEXT NOT NULL,
+                            timestamp INTEGER NOT NULL,
+                            PRIMARY KEY (bvid, cid, quality))''')
+        conn.commit()
+        conn.close()
 
 
 # ===================== 核心下载器类 =====================
@@ -59,7 +76,7 @@ class BilibiliDownloader:
         self.session = get_session_with_retries(timeout=60, retries=5)
         self._init_session()
         self.logger = self._setup_logger()
-        self.downloaded = self._load_download_history()
+        # self.downloaded = self._load_download_history()
 
     def _init_session(self):
         headers = {
@@ -82,40 +99,46 @@ class BilibiliDownloader:
         return logger
 
     # ------------------- 下载记录管理 -------------------
-    def _load_download_history(self) -> Set[Tuple[str, int, int]]:
-        try:
-            if self.config.history_file.exists():
-                if self.config.history_file.stat().st_size == 0:
-                    return set()
-                with open(self.config.history_file, "r", encoding="utf-8") as f:
-                    records = json.load(f)
-                    return {(item["bvid"], item["cid"], item["quality"]) for item in records}
-            return set()
-        except json.JSONDecodeError:
-            self.logger.error("历史记录文件损坏，已重置")
-            return set()
-        except Exception as e:
-            self.logger.error(f"加载历史记录失败: {str(e)}")
-            return set()
+    def _load_download_history(self, bvid: str, cid: int, quality: int) -> bool:
+        """直接检查数据库中是否已下载"""
+        conn = sqlite3.connect(self.config.history_db)
+        cursor = conn.cursor()
+
+        # 直接查询该记录是否存在
+        cursor.execute('SELECT 1 FROM downloads WHERE bvid = ? AND cid = ? AND quality = ? LIMIT 1',
+                       (bvid, cid, quality))
+        result = cursor.fetchone()
+
+        conn.close()
+
+        # 如果查询结果不为空，说明该记录存在
+        return result is not None
 
     def _save_download_entry(self, bvid: str, cid: int, quality: int, title: str, up_name: str):
+        """将下载记录保存到数据库"""
         try:
-            records = []
-            if self.config.history_file.exists():
-                with open(self.config.history_file, "r", encoding="utf-8") as f:
-                    records = json.load(f)
-            records.append({
-                "bvid": bvid,
-                "cid": cid,
-                "quality": quality,
-                "title": title,
-                "up": up_name,
-                "timestamp": int(time.time())
-            })
-            with open(self.config.history_file, "w", encoding="utf-8") as f:
-                json.dump(records, f, indent=2, ensure_ascii=False)
+            timestamp = int(time.time())
+            conn = sqlite3.connect(self.config.history_db)
+            cursor = conn.cursor()
+            cursor.execute('''INSERT OR REPLACE INTO downloads (bvid, cid, quality, title, up_name, timestamp)
+                              VALUES (?, ?, ?, ?, ?, ?)''', (bvid, cid, quality, title, up_name, timestamp))
+            conn.commit()
+            conn.close()
         except Exception as e:
             self.logger.error(f"保存记录失败: {str(e)}")
+
+    def _get_downloaded_count(self) -> int:
+        """获取已下载记录的数量"""
+        try:
+            conn = sqlite3.connect(self.config.history_db)
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM downloads")
+            downloaded_count = cursor.fetchone()[0]  # 获取计数结果
+            conn.close()
+            return downloaded_count
+        except Exception as e:
+            self.logger.error(f"获取已下载记录数量失败: {str(e)}")
+            return 0
 
     # ------------------- 收藏夹获取 -------------------
     def get_user_folders(self) -> List[Dict]:
@@ -270,7 +293,7 @@ class BilibiliDownloader:
           suffix: 输出文件名后缀（例如"-hdr"）
         """
         try:
-            if (bvid, cid, quality) in self.downloaded:
+            if self._load_download_history(bvid, cid, quality):
                 self.logger.info(f"跳过已下载内容: {bvid}-{cid}")
                 return True
 
@@ -311,7 +334,7 @@ class BilibiliDownloader:
 
             if success:
                 self._save_download_entry(bvid, cid, quality, title, up_name)
-                self.downloaded.add((bvid, cid, quality))
+                # self.downloaded.add((bvid, cid, quality))
             temp_video.unlink(missing_ok=True)
             temp_audio.unlink(missing_ok=True)
             return success
@@ -391,7 +414,8 @@ class InteractiveManager:
         for idx, folder in enumerate(folders, 1):
             print(f"  {idx}. {folder['title']} ({folder['media_count']}个视频)")
         while True:
-            selection = input("\n请选择要下载的序号（多个用逗号分隔，q退出）: ").strip()
+            # selection = input("\n请选择要下载的序号（多个用逗号分隔，q退出）: ").strip()
+            selection = str(2)
             if selection.lower() == "q":
                 return []
             try:
@@ -424,7 +448,10 @@ def main():
     )
 
     downloader = BilibiliDownloader(config)
-    print(f"已加载历史记录：{len(downloader.downloaded)} 条")
+
+    # 获取已下载记录的数量
+    downloaded_count = downloader._get_downloaded_count()
+    print(f"已加载历史记录：{downloaded_count} 条")
 
     use_highest_quality = True
     """choice = input("是否以最高画质下载所有视频？(Y/n): ").strip().lower()
