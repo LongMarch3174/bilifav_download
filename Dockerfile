@@ -1,21 +1,19 @@
 # 使用带有 ffmpeg 的官方镜像作为基础镜像
 FROM jrottenberg/ffmpeg:7.1-ubuntu2404
 
+RUN sed -i 's@http://archive.ubuntu.com/ubuntu/@http://mirrors.aliyun.com/ubuntu/@g' /etc/apt/sources.list # 更换源
+
 # 设置工作目录
 WORKDIR /app
 
 # 更新包列表并安装 Python 3.8 和相关依赖
-RUN apt update && \
-    apt install -y \
-    python3 \
-    python3-dev \
-    python3-pip
+RUN apt clean && apt update && apt install -y python3
+RUN apt install -y python3-dev
+RUN apt install -y python3-pip
 
-# 设置默认 python 指令为 python3.8
-RUN update-alternatives --install /usr/bin/python python /usr/bin/python3.8 1
+RUN ln -sf /usr/bin/pip3 /usr/bin/pip && ln -sf /usr/bin/python3 /usr/bin/python
 
-# 确保 pip 是最新版本
-RUN python -m pip install --upgrade pip
+RUN mv /usr/lib/python3.12/EXTERNALLY-MANAGED /usr/lib/python3.12/EXTERNALLY-MANAGED.bk
 
 # 将项目文件复制到容器的工作目录中
 COPY . /app
