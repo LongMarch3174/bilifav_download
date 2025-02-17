@@ -27,5 +27,7 @@ RUN crontab /etc/cron.d/my-cron-job
 # 映射本地文件到容器的工作目录
 VOLUME ["/app/bili_videos"]
 
+EXPOSE 61234
+
 # 启动 cron 和 Python 脚本
 ENTRYPOINT ["/etc/init.d/stup.sh"]
