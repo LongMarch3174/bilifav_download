@@ -63,8 +63,9 @@ class Config:
                             quality INTEGER NOT NULL,
                             title TEXT NOT NULL,
                             up_name TEXT NOT NULL,
+                            folder_name TEXT NOT NULL,
                             timestamp INTEGER NOT NULL,
-                            PRIMARY KEY (bvid, cid, quality))''')
+                            PRIMARY KEY (bvid, cid, quality, folder_name))''')
         conn.commit()
         conn.close()
 
@@ -114,14 +115,15 @@ class BilibiliDownloader:
         # 如果查询结果不为空，说明该记录存在
         return result is not None
 
-    def _save_download_entry(self, bvid: str, cid: int, quality: int, title: str, up_name: str):
+    def _save_download_entry(self, bvid: str, cid: int, quality: int, title: str, up_name: str, folder_name: str):
         """将下载记录保存到数据库"""
         try:
             timestamp = int(time.time())
             conn = sqlite3.connect(self.config.history_db)
             cursor = conn.cursor()
-            cursor.execute('''INSERT OR REPLACE INTO downloads (bvid, cid, quality, title, up_name, timestamp)
-                              VALUES (?, ?, ?, ?, ?, ?)''', (bvid, cid, quality, title, up_name, timestamp))
+            cursor.execute('''INSERT OR REPLACE INTO downloads (bvid, cid, quality, title, up_name, folder_name, timestamp)
+                              VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                           (bvid, cid, quality, title, up_name, folder_name, timestamp))
             conn.commit()
             conn.close()
         except Exception as e:
@@ -138,6 +140,25 @@ class BilibiliDownloader:
             return downloaded_count
         except Exception as e:
             self.logger.error(f"获取已下载记录数量失败: {str(e)}")
+            return 0
+
+    def _get_folder_downloaded_count_and_last_download_info(self, folder_name: str) -> int:
+        """获取该收藏夹的视频下载总数和最后一次下载的视频bvid和cid"""
+        try:
+            conn = sqlite3.connect(self.config.history_db)
+            cursor = conn.cursor()
+            # 获取该收藏夹所有下载的总数，并返回最后一条记录的 bvid 和 cid
+            cursor.execute('''SELECT COUNT(*) FROM downloads WHERE folder_name = ?''',
+                           (folder_name,))
+            result = cursor.fetchone()
+            conn.close()
+
+            # 如果没有记录，返回 0 和 None
+            if result is None or result[0] == 0:
+                return 0
+            return result[0]
+        except Exception as e:
+            self.logger.error(f"获取下载记录失败: {str(e)}")
             return 0
 
     # ------------------- 收藏夹获取 -------------------
@@ -281,7 +302,7 @@ class BilibiliDownloader:
             self.logger.error(f"FFmpeg异常: {str(e)}")
             return False
 
-    def download_video(self, bvid: str, cid: int, quality: int, dest_dir: Optional[Path] = None,
+    def download_video(self, bvid: str, cid: int, quality: int, folder_name: str, dest_dir: Optional[Path] = None,
                        suffix: str = "") -> bool:
         """
         完整的下载流程
@@ -333,7 +354,7 @@ class BilibiliDownloader:
             )
 
             if success:
-                self._save_download_entry(bvid, cid, quality, title, up_name)
+                self._save_download_entry(bvid, cid, quality, title, up_name, folder_name=folder_name)
                 # self.downloaded.add((bvid, cid, quality))
             temp_video.unlink(missing_ok=True)
             temp_audio.unlink(missing_ok=True)
@@ -479,13 +500,21 @@ def main():
         folder_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n正在处理收藏夹: {folder_title} (ID: {folder_id})")
 
+        # 查询数据库中该收藏夹的下载记录数量以及上次下载的 bvid 和 cid
+        downloaded_count = downloader._get_folder_downloaded_count_and_last_download_info(folder_title)
+
         medias = downloader._get_paginated_data(
             "https://api.bilibili.com/medialist/gateway/base/spaceDetail",
             {"media_id": folder_id, "keyword": "", "order": "mtime", "type": 0, "tid": 0, "jsonp": "jsonp"},
             data_key="medias"
         )
 
-        for media in medias:
+        # 计算当前收藏夹视频数量和要下载的视频数量
+        total_new_videos = len(medias)
+        new_download_count = total_new_videos - downloaded_count
+        print(f"此次下载数量：{new_download_count} 条")
+
+        for media in medias[:new_download_count]:
             bvid = media.get("bvid")
             if not bvid:
                 continue
@@ -493,6 +522,10 @@ def main():
             video_info = downloader.get_video_info(bvid)
             if not video_info:
                 print(f"跳过无效视频: {bvid}")
+
+                # 无效视频记录到数据库
+                folder_name = folder_info['title']
+                downloader._save_download_entry(bvid, -1, -1, "无效视频", "unknown", folder_name)
                 continue
 
             for page in video_info.get("pages", []):
@@ -516,7 +549,8 @@ def main():
                     selected_quality = InteractiveManager.select_quality(qualities)
 
                 # 下载最高画质版本（下载结果放在收藏夹目录下）
-                if downloader.download_video(bvid, cid, selected_quality, dest_dir=folder_dir):
+                if downloader.download_video(bvid, cid, selected_quality, dest_dir=folder_dir,
+                                             folder_name=folder_title):
                     print(f"✓ 成功下载: {video_info['title']} - {page['part']}")
                 else:
                     print(f"✗ 下载失败: {video_info['title']} - {page['part']}")
@@ -527,7 +561,8 @@ def main():
                     hdr_quality = max(hdr_candidates)
                     hdr_dir = folder_dir / "hdr"
                     hdr_dir.mkdir(parents=True, exist_ok=True)
-                    if downloader.download_video(bvid, cid, hdr_quality, dest_dir=hdr_dir, suffix="-hdr"):
+                    if downloader.download_video(bvid, cid, hdr_quality, dest_dir=hdr_dir, folder_name=folder_title,
+                                                 suffix="-hdr"):
                         print(f"✓ HDR版本下载成功: {video_info['title']} - {page['part']}")
                     else:
                         print(f"✗ HDR版本下载失败: {video_info['title']} - {page['part']}")
