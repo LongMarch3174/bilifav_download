@@ -353,7 +353,7 @@ class BilibiliDownloader:
                     self._merge_files(temp_video, temp_audio, output_path)
             )
 
-            if success:
+            if success and suffix == "":
                 self._save_download_entry(bvid, cid, quality, title, up_name, folder_name=folder_name)
                 # self.downloaded.add((bvid, cid, quality))
             temp_video.unlink(missing_ok=True)
