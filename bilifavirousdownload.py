@@ -148,7 +148,7 @@ class BilibiliDownloader:
             conn = sqlite3.connect(self.config.history_db)
             cursor = conn.cursor()
             # 获取该收藏夹所有下载的总数，并返回最后一条记录的 bvid 和 cid
-            cursor.execute('''SELECT COUNT(*) FROM downloads WHERE folder_name = ?''',
+            cursor.execute('''SELECT COUNT(DISTINCT bvid) FROM downloads WHERE folder_name = ?''',
                            (folder_name,))
             result = cursor.fetchone()
             conn.close()
@@ -333,7 +333,7 @@ class BilibiliDownloader:
             up_name = re.sub(r'[\\/:*?"<>|]', "", up_name).strip()
 
             sanitized_part = re.sub(r'[\\/:*?"<>|]', '', page_info['part']).strip()
-            output_name = f"{title}_{sanitized_part}-{up_name}{suffix}.mp4"
+            output_name = f"{title}_{sanitized_part}_{bvid}-{up_name}{suffix}.mp4"
 
             if dest_dir is None:
                 dest_dir = self.config.save_path
@@ -513,6 +513,8 @@ def main():
         total_new_videos = len(medias)
         new_download_count = total_new_videos - downloaded_count
         print(f"此次下载数量：{new_download_count} 条")
+
+        print(len(medias))
 
         for media in medias[:new_download_count]:
             bvid = media.get("bvid")
