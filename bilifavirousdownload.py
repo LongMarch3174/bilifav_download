@@ -15,6 +15,10 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 
+os.environ["http_proxy"] = "http://localhost:3174"
+os.environ["https_proxy"] = "http://localhost:3174"
+
+
 def get_session_with_retries(timeout: int = 60, retries: int = 5) -> requests.Session:
     """
     创建一个带重试机制的 Session，设置默认超时时间
@@ -333,7 +337,10 @@ class BilibiliDownloader:
             up_name = re.sub(r'[\\/:*?"<>|]', "", up_name).strip()
 
             sanitized_part = re.sub(r'[\\/:*?"<>|]', '', page_info['part']).strip()
-            output_name = f"{title}_{sanitized_part}_{bvid}-{up_name}{suffix}.mp4"
+            if title == sanitized_part:
+                output_name = f"{title}_{bvid}-{up_name}{suffix}.mp4"
+            else:
+                output_name = f"{title}_{sanitized_part}_{bvid}-{up_name}{suffix}.mp4"
 
             if dest_dir is None:
                 dest_dir = self.config.save_path
@@ -516,7 +523,7 @@ def main():
 
         print(len(medias))
 
-        for media in medias[:new_download_count]:
+        for media in reversed(medias[:new_download_count]):
             bvid = media.get("bvid")
             if not bvid:
                 continue
