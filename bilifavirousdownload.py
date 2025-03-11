@@ -10,8 +10,6 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass
 from http.cookies import SimpleCookie, CookieError
-
-from django.utils.timezone import override
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -549,7 +547,7 @@ def main():
             request_times=request_times,
         )
 
-        for media in reversed(medias[:1]):
+        for media in reversed(medias[:new_download_count]):
             bvid = media.get("bvid")
             if not bvid:
                 continue
