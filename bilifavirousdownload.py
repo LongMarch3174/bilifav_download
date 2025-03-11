@@ -10,10 +10,11 @@ from pathlib import Path
 from typing import List, Dict, Optional, Tuple, Set
 from dataclasses import dataclass
 from http.cookies import SimpleCookie, CookieError
+
+from django.utils.timezone import override
 from tqdm import tqdm
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-
 
 os.environ["http_proxy"] = "http://localhost:3174"
 os.environ["https_proxy"] = "http://localhost:3174"
@@ -44,7 +45,7 @@ class Config:
     cookies: str
     save_path: Path = Path("./downloads")
     ffmpeg_path: str = "ffmpeg"
-    request_interval: float = 1.5
+    request_interval: float = 1
     max_retries: int = 3
     history_db: Path = Path("./db/bilibili_downloader.db")
     temp_dir: Path = Path("./temp")
@@ -185,6 +186,7 @@ class BilibiliDownloader:
             )
             collected = self._get_paginated_data(
                 "https://api.bilibili.com/x/v3/fav/folder/collected/list",
+                {"up_mid": dede_userid.value},
                 data_key="list"
             )
             return created + collected
@@ -208,6 +210,27 @@ class BilibiliDownloader:
                 if len(items) < 20:
                     break
                 page += 1
+                time.sleep(self.config.request_interval)
+            except Exception as e:
+                self.logger.error(f"请求失败: {str(e)}")
+                break
+        return results
+
+    def _get_paginated_list(self, url: str, params: dict = None, data_key: str = "medias", request_times: int = 1) -> \
+            List[Dict]:
+        results = []
+        for page in range(1, request_times + 1):
+            try:
+                resp = self.session.get(url, params={"pn": page, "ps": 20, **(params or {})}, timeout=60)
+                resp.raise_for_status()
+                data = resp.json()
+                if data["code"] != 0:
+                    self.logger.error(f"API错误[{url}]: {data.get('message')}")
+                    break
+                items = data["data"].get(data_key, [])
+                results.extend(items)
+                if len(items) < 20:
+                    break
                 time.sleep(self.config.request_interval)
             except Exception as e:
                 self.logger.error(f"请求失败: {str(e)}")
@@ -510,20 +533,23 @@ def main():
         # 查询数据库中该收藏夹的下载记录数量以及上次下载的 bvid 和 cid
         downloaded_count = downloader._get_folder_downloaded_count_and_last_download_info(folder_title)
 
-        medias = downloader._get_paginated_data(
-            "https://api.bilibili.com/medialist/gateway/base/spaceDetail",
-            {"media_id": folder_id, "keyword": "", "order": "mtime", "type": 0, "tid": 0, "jsonp": "jsonp"},
-            data_key="medias"
-        )
-
         # 计算当前收藏夹视频数量和要下载的视频数量
-        total_new_videos = len(medias)
+        total_new_videos = folder_info["media_count"]
+        print(f"收藏夹数量：{total_new_videos} 条")
         new_download_count = total_new_videos - downloaded_count
         print(f"此次下载数量：{new_download_count} 条")
 
-        print(len(medias))
+        # 1页20条视频信息 request = (n+19) // 20
+        request_times = (new_download_count + 19) // 20
 
-        for media in reversed(medias[:new_download_count]):
+        medias = downloader._get_paginated_list(
+            "https://api.bilibili.com/medialist/gateway/base/spaceDetail",
+            {"media_id": folder_id, "keyword": "", "order": "mtime", "type": 0, "tid": 0, "jsonp": "jsonp"},
+            data_key="medias",
+            request_times=request_times,
+        )
+
+        for media in reversed(medias[:1]):
             bvid = media.get("bvid")
             if not bvid:
                 continue
