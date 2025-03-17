@@ -348,6 +348,18 @@ class BilibiliDownloader:
                 return False
 
             title = re.sub(r'[\\/:*?"<>|]', "", video_info["title"]).strip()[:100]
+            """
+            保留中文、英文字母、数字、空格、常见标点和括号，移除其它可能影响命令执行的生僻字符。
+            """
+            # 这里允许的字符包括：
+            # - 中文字符：\u4e00-\u9fff
+            # - 英文字母、数字、空格、下划线、横杠和句点
+            # - 常用括号 ()，若需要可添加其它符号
+            # 处理title
+            allowed_pattern = re.compile(r'[^ \u4e00-\u9fffA-Za-z0-9_\-\.\(\)]')
+            # 用空字符串替换不允许的字符
+            title = allowed_pattern.sub('', title)
+
             page_info = next((p for p in video_info["pages"] if p["cid"] == cid), None)
             if not page_info:
                 self.logger.error(f"未找到分P信息: {bvid}-{cid}")
@@ -358,6 +370,9 @@ class BilibiliDownloader:
             up_name = re.sub(r'[\\/:*?"<>|]', "", up_name).strip()
 
             sanitized_part = re.sub(r'[\\/:*?"<>|]', '', page_info['part']).strip()
+            # 处理sanitized_part
+            sanitized_part = allowed_pattern.sub('', sanitized_part)
+
             if title == sanitized_part:
                 output_name = f"{title}_{bvid}-{up_name}{suffix}.mp4"
             else:
