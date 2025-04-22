@@ -145,8 +145,8 @@ class BilibiliDownloader:
             self.logger.error(f"获取已下载记录数量失败: {str(e)}")
             return 0
 
-    def _get_folder_downloaded_count_and_last_download_info(self, folder_name: str) -> int:
-        """获取该收藏夹的视频下载总数和最后一次下载的视频bvid和cid"""
+    def _get_folder_downloaded_count(self, folder_name: str) -> int:
+        """获取该收藏夹的视频下载总数"""
         try:
             conn = sqlite3.connect(self.config.history_db)
             cursor = conn.cursor()
@@ -163,6 +163,22 @@ class BilibiliDownloader:
         except Exception as e:
             self.logger.error(f"获取下载记录失败: {str(e)}")
             return 0
+
+    def _is_media_downloaded_in_folder(self, bvid: str, folder_name: str) -> bool:
+        """检查指定收藏夹中是否已下载该 bvid"""
+        try:
+            conn = sqlite3.connect(self.config.history_db)
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT 1 FROM downloads WHERE bvid = ? AND folder_name = ? LIMIT 1",
+                (bvid, folder_name)
+            )
+            exists = cur.fetchone() is not None
+            conn.close()
+            return exists
+        except Exception as e:
+            self.logger.error(f"检查下载状态失败: {e}")
+            return False
 
     # ------------------- 收藏夹获取 -------------------
     def get_user_folders(self) -> List[Dict]:
@@ -214,26 +230,56 @@ class BilibiliDownloader:
                 break
         return results
 
-    def _get_paginated_list(self, url: str, params: dict = None, data_key: str = "medias", request_times: int = 1) -> \
-            List[Dict]:
-        results = []
-        for page in range(1, request_times + 1):
+    def _get_paginated_list(self,
+                            url: str,
+                            params: dict = None,
+                            data_key: str = "medias",
+                            folder_title: str = None) -> List[Dict]:
+        """
+        分页获取收藏夹内容：
+        - 从 params 中提取出 folder_name，用于限定本次下载目录的历史检测
+        - 遇到第一个已下载的视频就提前返回
+        原 signature 保持不变，与 main 调用兼容
+        """
+        new_medias: List[Dict] = []
+        page = 1
+
+        while True:
             try:
-                resp = self.session.get(url, params={"pn": page, "ps": 20, **(params or {})}, timeout=60)
+                resp = self.session.get(
+                    url,
+                    params={**(params or {}), 'pn': page, 'ps': 20},
+                    timeout=60
+                )
                 resp.raise_for_status()
                 data = resp.json()
-                if data["code"] != 0:
-                    self.logger.error(f"API错误[{url}]: {data.get('message')}")
+                if data.get('code') != 0:
+                    self.logger.error(f"分页接口错误[{url}]: {data.get('message')}")
                     break
-                items = data["data"].get(data_key, [])
-                results.extend(items)
-                if len(items) < 20:
+
+                items = data['data'].get(data_key, [])
+                if not items:
                     break
+
+                for m in items:
+                    bvid = m.get('bvid')
+                    if not bvid:
+                        continue
+
+                    # 先判断是否在本次目标收藏夹内已下载
+                    if folder_title and self._is_media_downloaded_in_folder(bvid, folder_title):
+                        # 遇到第一个已下载的，认为后续也已处理，可立即结束
+                        return new_medias
+                    else:
+                        new_medias.append(m)
+
+                page += 1
                 time.sleep(self.config.request_interval)
             except Exception as e:
-                self.logger.error(f"请求失败: {str(e)}")
+                self.logger.error(f"请求失败: {e}")
                 break
-        return results
+
+        return new_medias
 
     # ------------------- 视频处理 -------------------
     def get_video_info(self, bvid: str) -> Optional[Dict]:
@@ -543,26 +589,13 @@ def main():
         folder_dir.mkdir(parents=True, exist_ok=True)
         print(f"\n正在处理收藏夹: {folder_title} (ID: {folder_id})")
 
-        # 查询数据库中该收藏夹的下载记录数量以及上次下载的 bvid 和 cid
-        downloaded_count = downloader._get_folder_downloaded_count_and_last_download_info(folder_title)
-
-        # 计算当前收藏夹视频数量和要下载的视频数量
-        total_new_videos = folder_info["media_count"]
-        print(f"收藏夹数量：{total_new_videos} 条")
-        new_download_count = total_new_videos - downloaded_count
-        print(f"此次下载数量：{new_download_count} 条")
-
-        # 1页20条视频信息 request = (n+19) // 20
-        request_times = (new_download_count + 19) // 20
-
         medias = downloader._get_paginated_list(
             "https://api.bilibili.com/medialist/gateway/base/spaceDetail",
             {"media_id": folder_id, "keyword": "", "order": "mtime", "type": 0, "tid": 0, "jsonp": "jsonp"},
-            data_key="medias",
-            request_times=request_times,
+            data_key="medias", folder_title=folder_title
         )
 
-        for media in reversed(medias[:new_download_count]):
+        for media in reversed(medias):
             bvid = media.get("bvid")
             if not bvid:
                 continue
