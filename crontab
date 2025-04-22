@@ -1,2 +1,0 @@
-# 每 10 分钟执行一次 Python 脚本
-*/10 * * * * /app/start_bilifavdown.sh
